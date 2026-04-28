@@ -19,6 +19,7 @@ package net.skinsrestorer.shared.connections;
 
 import ch.jalu.configme.SettingsManager;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import net.skinsrestorer.api.PropertyUtils;
 import net.skinsrestorer.api.connections.MineSkinAPI;
@@ -33,6 +34,7 @@ import net.skinsrestorer.shared.connections.http.HttpResponse;
 import net.skinsrestorer.shared.connections.mineskin.MineSkinVariant;
 import net.skinsrestorer.shared.connections.mineskin.MineSkinVisibility;
 import net.skinsrestorer.shared.connections.mineskin.requests.MineSkinUrlRequest;
+
 import net.skinsrestorer.shared.connections.mineskin.responses.MineSkinUrlResponse;
 import net.skinsrestorer.shared.exception.DataRequestExceptionShared;
 import net.skinsrestorer.shared.exception.MineSkinExceptionShared;
@@ -62,6 +64,10 @@ public class MineSkinAPIImpl implements MineSkinAPI {
     private static final int MAX_RETRIES = 5;
     private static final String MINESKIN_USER_AGENT = "SkinsRestorer/MineSkinAPI";
     private static final URI MINESKIN_ENDPOINT = URI.create("https://api.mineskin.org/v2/generate");
+    private static final URI[] UUID_RESOLVE_ENDPOINTS = {
+            URI.create("https://playerdb.co/api/player/minecraft/"),
+            URI.create("https://api.ashcon.app/mojang/v2/user/"),
+    };
     private static final URI AXOLOTL_DECRYPT_ENDPOINT = URI.create("https://axolotl.skinsrestorer.net/mineskin/decrypt-url");
     private final Semaphore semaphore = new Semaphore(5);
     private final Gson gson = new Gson();
@@ -107,8 +113,56 @@ public class MineSkinAPIImpl implements MineSkinAPI {
         throw new MineSkinExceptionShared(Message.ERROR_MS_API_FAILED);
     }
 
+    @Override
+    public MineSkinResponse genSkinFromName(String playerName, @Nullable SkinVariant skinVariant) throws DataRequestException, MineSkinException {
+        try {
+            int retryAttempts = 0;
+            do {
+                semaphore.acquire();
+                try {
+                    long waitDuration = nextRequestAt.get() - System.currentTimeMillis();
+                    if (waitDuration > 0) {
+                        logger.debug("[INFO] Waiting %dms before next MineSkin request...".formatted(waitDuration));
+                        Thread.sleep(waitDuration);
+                    }
+
+                    Optional<MineSkinResponse> optional = genSkinFromNameInternal(playerName, skinVariant);
+
+                    if (optional.isPresent()) {
+                        return optional.get();
+                    }
+                } catch (IOException e) {
+                    logger.debug(SRLogLevel.WARNING, "[ERROR] MineSkin Failed! IOException (connection/disk): (%s)".formatted(playerName), e);
+                    throw new DataRequestExceptionShared(e);
+                } finally {
+                    semaphore.release();
+                }
+            } while (++retryAttempts < MAX_RETRIES);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new DataRequestExceptionShared(e);
+        }
+
+        throw new MineSkinExceptionShared(Message.ERROR_MS_API_FAILED);
+    }
+
     private Optional<MineSkinResponse> genSkinInternal(String imageUrl, @Nullable SkinVariant skinVariant) throws DataRequestException, MineSkinException, IOException {
         HttpResponse httpResponse = queryURL(imageUrl, skinVariant);
+        return parseMineSkinResponse(httpResponse, skinVariant);
+    }
+
+    private Optional<MineSkinResponse> genSkinFromNameInternal(String playerName, @Nullable SkinVariant skinVariant) throws DataRequestException, MineSkinException, IOException {
+        String uuid = resolveUUID(playerName);
+        if (uuid == null) {
+            logger.debug("[ERROR] Could not resolve UUID for player: %s".formatted(playerName));
+            throw new DataRequestExceptionShared(new IOException("Failed to resolve UUID for " + playerName));
+        }
+
+        HttpResponse httpResponse = queryUserUrl(uuid, skinVariant);
+        return parseMineSkinResponse(httpResponse, skinVariant);
+    }
+
+    private Optional<MineSkinResponse> parseMineSkinResponse(HttpResponse httpResponse, @Nullable SkinVariant skinVariant) throws DataRequestException, MineSkinException {
         logger.debug("MineSkinAPI: Response: %s".formatted(httpResponse));
 
         MineSkinUrlResponse response = httpResponse.getBodyAs(MineSkinUrlResponse.class);
@@ -127,7 +181,7 @@ public class MineSkinAPIImpl implements MineSkinAPI {
                     skinVariant, PropertyUtils.getSkinVariant(property)));
         } else {
             for (MineSkinUrlResponse.Error error : response.getErrors()) {
-                logger.debug("[ERROR] MineSkin Failed! Reason: %s Image URL: %s".formatted(error, imageUrl));
+                logger.debug("[ERROR] MineSkin Failed! Reason: %s".formatted(error));
                 return switch (error.getCode()) {
                     case "rate_limit" -> // try again
                             Optional.empty();
@@ -159,7 +213,7 @@ public class MineSkinAPIImpl implements MineSkinAPI {
                 };
             }
 
-            logger.debug("[ERROR] MineSkin Failed! Unknown error: (Image URL: %s) %d".formatted(imageUrl, httpResponse.statusCode()));
+            logger.debug("[ERROR] MineSkin Failed! Unknown error: %d".formatted(httpResponse.statusCode()));
             throw new MineSkinExceptionShared(Message.ERROR_MS_API_FAILED);
         }
     }
@@ -186,6 +240,41 @@ public class MineSkinAPIImpl implements MineSkinAPI {
                                 null,
                                 url
                         )), HttpClient.HttpType.JSON),
+                        HttpClient.HttpType.JSON,
+                        MINESKIN_USER_AGENT,
+                        HttpClient.HttpMethod.POST,
+                        headers,
+                        90_000
+                );
+            } catch (IOException e) {
+                if (i >= 2) {
+                    throw new IOException(e);
+                }
+            }
+        }
+    }
+
+    private HttpResponse queryUserUrl(String uuid, @Nullable SkinVariant skinVariant) throws IOException {
+        for (int i = 0; true; i++) { // try 3 times if server not responding
+            try {
+                metricsCounter.increment(MetricsCounter.Service.MINESKIN_CALLS);
+
+                Map<String, String> headers = new HashMap<>();
+                getApiKey(settings).ifPresent(s ->
+                        headers.put("Authorization", "Bearer %s".formatted(s)));
+
+                Map<String, Object> requestBody = new HashMap<>();
+                requestBody.put("variant", skinVariant == null ? MineSkinVariant.UNKNOWN : switch (skinVariant) {
+                    case CLASSIC -> MineSkinVariant.CLASSIC;
+                    case SLIM -> MineSkinVariant.SLIM;
+                });
+                requestBody.put("visibility", settings.getProperty(APIConfig.MINESKIN_SECRET_SKINS)
+                        ? MineSkinVisibility.UNLISTED : MineSkinVisibility.PUBLIC);
+                requestBody.put("user", uuid);
+
+                return httpClient.execute(
+                        MINESKIN_ENDPOINT,
+                        new HttpClient.RequestBody(gson.toJson(requestBody), HttpClient.HttpType.JSON),
                         HttpClient.HttpType.JSON,
                         MINESKIN_USER_AGENT,
                         HttpClient.HttpMethod.POST,
@@ -259,6 +348,80 @@ public class MineSkinAPIImpl implements MineSkinAPI {
         }
     }
 
+    @Nullable
+    private String resolveUUID(String playerName) throws IOException {
+        logger.debug("Resolving UUID for player: %s".formatted(playerName));
+
+        // Try each UUID resolver endpoint in order until one works
+        for (URI endpoint : UUID_RESOLVE_ENDPOINTS) {
+            String uuid = tryResolveUUID(endpoint, playerName);
+            if (uuid != null) {
+                logger.debug("Resolved UUID for %s: %s".formatted(playerName, uuid));
+                return uuid;
+            }
+        }
+
+        logger.debug("[ERROR] Failed to resolve UUID for %s from all endpoints".formatted(playerName));
+        return null;
+    }
+
+    @Nullable
+    private String tryResolveUUID(URI endpoint, String playerName) {
+        for (int i = 0; true; i++) {
+            try {
+                HttpResponse response = httpClient.execute(
+                        endpoint.resolve(playerName),
+                        null,
+                        HttpClient.HttpType.JSON,
+                        MINESKIN_USER_AGENT,
+                        HttpClient.HttpMethod.GET,
+                        Map.of(),
+                        10_000
+                );
+
+                if (response.statusCode() == 200) {
+                    return extractUUID(response.body());
+                }
+
+                return null;
+            } catch (IOException e) {
+                if (i >= 1) {
+                    logger.debug("[ERROR] UUID resolve failed for %s: %s".formatted(endpoint, e.getMessage()));
+                    return null;
+                }
+            }
+        }
+    }
+
+    @Nullable
+    private String extractUUID(String body) {
+        try {
+            // Try PlayerDB format: {"success":true,"data":{"player":{"id":"uuid"}}}
+            com.google.gson.JsonObject json = gson.fromJson(body, com.google.gson.JsonObject.class);
+            if (json.has("data")) {
+                com.google.gson.JsonObject data = json.getAsJsonObject("data");
+                if (data.has("player")) {
+                    com.google.gson.JsonObject player = data.getAsJsonObject("player");
+                    if (player.has("id")) {
+                        return player.get("id").getAsString();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        try {
+            // Try Ashcon format: {"uuid":"uuid","username":"..."}
+            com.google.gson.JsonObject json = gson.fromJson(body, com.google.gson.JsonObject.class);
+            if (json.has("uuid")) {
+                return json.get("uuid").getAsString();
+            }
+        } catch (Exception ignored) {
+        }
+
+        return null;
+    }
+
     private static class AxolotlDecryptResponse {
         private String url;
     }
@@ -266,4 +429,5 @@ public class MineSkinAPIImpl implements MineSkinAPI {
     private static class AxolotlErrorResponse {
         private String error;
     }
+
 }

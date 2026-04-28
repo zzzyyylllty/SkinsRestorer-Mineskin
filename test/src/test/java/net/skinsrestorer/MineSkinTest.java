@@ -19,65 +19,77 @@ package net.skinsrestorer;
 
 import ch.jalu.configme.SettingsManager;
 import ch.jalu.injector.Injector;
-import lombok.extern.slf4j.Slf4j;
-import net.skinsrestorer.api.connections.model.MineSkinResponse;
 import net.skinsrestorer.shared.config.APIConfig;
 import net.skinsrestorer.shared.config.AdvancedConfig;
 import net.skinsrestorer.shared.connections.MineSkinAPIImpl;
-import net.skinsrestorer.shared.subjects.messages.SkinsRestorerLocale;
-import net.skinsrestorer.shared.utils.MetricsCounter;
+import net.skinsrestorer.shared.connections.http.HttpClient;
+import net.skinsrestorer.shared.connections.http.HttpResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-@Slf4j
 @ExtendWith({MockitoExtension.class, SRExtension.class})
 class MineSkinTest {
     private static final String TEST_URL = "https://skinsrestorer.net/skinsrestorer-skin.png";
+    private static final String FAKE_SKIN_VALUE = "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYWJjMTIzIn19fQ==";
+
     @Mock
     private SettingsManager settings;
-    @Mock
-    private SkinsRestorerLocale skinsRestorerLocale;
 
     @Test
     void services(Injector injector) {
         assertDoesNotThrow(() -> {
-            injector.register(SkinsRestorerLocale.class, skinsRestorerLocale);
+            HttpClient httpClient = mock(HttpClient.class);
+
+            String fakeResponse = """
+                    {
+                        "skin": {
+                            "uuid": "test-uuid",
+                            "name": "test",
+                            "visibility": "PUBLIC",
+                            "variant": "CLASSIC",
+                            "texture": {
+                                "data": {
+                                    "value": "%s",
+                                    "signature": "test-signature"
+                                }
+                            }
+                        },
+                        "rateLimit": {
+                            "next": {"absolute": 9999999999, "relative": 60000},
+                            "delay": {"millis": 0, "seconds": 0},
+                            "limit": {"limit": 60, "remaining": 59, "reset": 9999999999}
+                        },
+                        "success": true,
+                        "errors": [],
+                        "warnings": [],
+                        "messages": [],
+                        "links": {}
+                    }
+                    """.formatted(FAKE_SKIN_VALUE);
+
+            when(httpClient.execute(any(), any(), any(), any(), any(), any(), anyInt()))
+                    .thenReturn(new HttpResponse(200, fakeResponse, Map.of()));
 
             when(settings.getProperty(APIConfig.MINESKIN_API_KEY)).thenReturn("");
-            when(settings.getProperty(AdvancedConfig.NO_CONNECTIONS)).thenReturn(false);
+            when(settings.getProperty(APIConfig.MINESKIN_SECRET_SKINS)).thenReturn(false);
 
             injector.register(SettingsManager.class, settings);
+            injector.register(HttpClient.class, httpClient);
 
-            String randomUrl = TEST_URL + "?" + UUID.randomUUID(); // Random URL to avoid caching
-            MetricsCounter metricsCounter = injector.getSingleton(MetricsCounter.class);
+            String randomUrl = TEST_URL + "?" + UUID.randomUUID();
 
-            try {
-                MineSkinResponse response = injector.getSingleton(MineSkinAPIImpl.class)
-                        .genSkin(randomUrl, null);
-            } catch (Exception e) {
-                log.error("Failed to generate skin", e);
-            }
-
-            /*
-
-        assertNotNull(response);
-
-        assertEquals(1, metricsCounter.collect(MetricsCounter.Service.MINE_SKIN));
-         */
+            injector.getSingleton(MineSkinAPIImpl.class)
+                    .genSkin(randomUrl, null);
         });
-
-        /*
-
-        assertNotNull(response);
-
-        assertEquals(1, metricsCounter.collect(MetricsCounter.Service.MINE_SKIN));
-         */
     }
 }

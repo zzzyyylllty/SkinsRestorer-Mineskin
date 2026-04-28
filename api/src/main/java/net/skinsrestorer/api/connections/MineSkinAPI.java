@@ -109,4 +109,16 @@ public interface MineSkinAPI {
     default MineSkinResponse genSkin(byte[] pngData, @Nullable SkinVariant skinVariant) throws DataRequestException, MineSkinException {
         return genSkin(Base64Utils.encodePNGAsUrl(pngData), skinVariant);
     }
+
+    /**
+     * Generates a skin using the <a href="https://mineskin.org/">MineSkin</a> API from a Minecraft username.
+     * Uses the {@code /v2/generate/user/{name}} endpoint to look up and generate a skin from a player's current skin.
+     *
+     * @param playerName  a Minecraft username
+     * @param skinVariant can be null, steve or slim
+     * @return Custom skin property containing "value" and "signature"
+     * @throws DataRequestException on error
+     * @throws MineSkinException    when there was a MineSkin specific error
+     */
+    MineSkinResponse genSkinFromName(String playerName, @Nullable SkinVariant skinVariant) throws DataRequestException, MineSkinException;
 }

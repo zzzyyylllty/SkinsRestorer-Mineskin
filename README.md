@@ -1,4 +1,4 @@
-<img align="right" src="https://github.com/SkinsRestorer/skinsrestorer.net/blob/main/public/logo.png?raw=true" height="150" width="150">
+ AP<img align="right" src="https://github.com/SkinsRestorer/skinsrestorer.net/blob/main/public/logo.png?raw=true" height="150" width="150">
 
 [![modrinth](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/available/modrinth_vector.svg)](https://modrinth.com/plugin/skinsrestorer) [![hangar](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/available/hangar_vector.svg)](https://hangar.papermc.io/SRTeam/SkinsRestorer)
 

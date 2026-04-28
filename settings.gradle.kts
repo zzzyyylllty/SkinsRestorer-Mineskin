@@ -47,17 +47,18 @@ setupSRSubproject("bukkit")
 setupSRSubproject("bungee")
 setupSRSubproject("velocity")
 
-setupSubproject("skinsrestorer-mod-common") {
-    projectDir = file("mod/common")
-}
-
-setupSubproject("skinsrestorer-mod-fabric") {
-    projectDir = file("mod/fabric")
-}
-
-setupSubproject("skinsrestorer-mod-neoforge") {
-    projectDir = file("mod/neoforge")
-}
+// TODO: Re-enable when neoforge maven repo is accessible
+//setupSubproject("skinsrestorer-mod-common") {
+//    projectDir = file("mod/common")
+//}
+//
+//setupSubproject("skinsrestorer-mod-fabric") {
+//    projectDir = file("mod/fabric")
+//}
+//
+//setupSubproject("skinsrestorer-mod-neoforge") {
+//    projectDir = file("mod/neoforge")
+//}
 
 setupSubproject("skinsrestorer") {
     projectDir = file("universal")

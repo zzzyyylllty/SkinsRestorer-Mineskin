@@ -46,17 +46,4 @@ public class APIConfig implements SettingsHolder {
             "Be aware that commands like /skin random will not work without this feature."
     })
     public static final Property<Boolean> FETCH_RECOMMENDED_SKINS = newProperty("api.fetchRecommendedSkins", true);
-    @Comment({
-            "Window size in seconds for batching Mojang API requests to avoid rate limits.",
-            "Requests are batched in windows of this duration or up to 10 requests, whichever comes first.",
-            "Default is 1 second."
-    })
-    public static final Property<Integer> MOJANG_BATCH_WINDOW_SECONDS = newProperty("api.mojangBatchWindowSeconds", 1);
-    @Comment({
-            "Enable Ely.by as a skin data provider.",
-            "When enabled, SkinsRestorer will use Ely.by to fetch player skins instead of Mojang.",
-            "This is useful for servers that support non-premium players using Ely.by accounts.",
-            "Disabled by default. Enable only if your server uses Ely.by."
-    })
-    public static final Property<Boolean> ELYBY_ENABLED = newProperty("api.elyByEnabled", false);
 }

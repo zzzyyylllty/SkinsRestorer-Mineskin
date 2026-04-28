@@ -140,12 +140,6 @@ public class MetricsCounter {
     }
 
     public enum Service {
-        MINESKIN_CALLS,
-        MOJANG_UUID,
-        MOJANG_PROFILE,
-        ELYBY_UUID,
-        ECLIPSE_UUID,
-        ECLIPSE_PROFILE,
-        ELYBY_PROFILE
+        MINESKIN_CALLS
     }
 }

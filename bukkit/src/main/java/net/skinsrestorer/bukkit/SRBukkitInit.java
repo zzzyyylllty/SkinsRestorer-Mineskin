@@ -26,6 +26,7 @@ import net.skinsrestorer.bukkit.listener.*;
 import net.skinsrestorer.bukkit.paper.PaperPlayerJoinEvent;
 import net.skinsrestorer.bukkit.refresher.MappingSpigotSkinRefresher;
 import net.skinsrestorer.bukkit.refresher.PaperSkinRefresher;
+import net.skinsrestorer.bukkit.refresher.ReflectionSkinRefresh;
 import net.skinsrestorer.bukkit.refresher.SkinRefresher;
 import net.skinsrestorer.bukkit.refresher.SpigotSkinRefresher;
 import net.skinsrestorer.bukkit.utils.BukkitPropertyApplier;
@@ -98,6 +99,16 @@ public class SRBukkitInit implements SRServerPlatformInit {
             return SkinRefresher.NO_OP;
         }
 
+        // On Mojang-mapped runtimes (e.g. Leaf), Spigot-remapped mapping classes
+        // reference net.minecraft.server.level.EntityPlayer in their bytecode which
+        // does not exist on Mojang-mapped servers, causing NoClassDefFoundError.
+        // Check this before any Paper/Spigot detection to avoid loading incompatible
+        // classes.
+        if (ReflectionSkinRefresh.isAvailable()) {
+            logger.debug("Mojang mappings detected, using ReflectionSkinRefresh");
+            return new ReflectionSkinRefresh();
+        }
+
         if (isPaper()) {
             boolean viaBackwardsExists = adapter.getPluginInfo("ViaBackwards").isPresent();
             boolean protocolSupportExists = adapter.getPluginInfo("ProtocolSupport").isPresent();
@@ -107,6 +118,13 @@ public class SRBukkitInit implements SRServerPlatformInit {
             }
 
             // use PaperSkinRefresher if no VersionHack plugin found
+            // PaperSkinRefresher uses CraftPlayer.refreshPlayer() which is broken/removed on 1.21+
+            // For 1.21+, the MappingSpigotSkinRefresher handles the newer protocol correctly.
+            if (BukkitReflection.SERVER_VERSION.isNewerThan(new SemanticVersion(1, 21, 0))) {
+                logger.debug("MC 1.21+ detected, using MappingSpigotSkinRefresher instead of PaperSkinRefresher");
+                return selectSpigotRefresher();
+            }
+
             try {
                 logger.debug("Using PaperSkinRefresher");
                 return injector.getSingleton(PaperSkinRefresher.class);

@@ -92,8 +92,6 @@ class LoadTest {
             SimplePluginManager pluginManager = mock(SimplePluginManager.class);
             when(pluginManager.getPlugins()).thenReturn(new JavaPlugin[0]);
             when(server.getPluginManager()).thenReturn(pluginManager);
-            when(server.getUpdateFolderFile()).thenReturn(tempDir.toFile());
-
             Bukkit.setServer(server);
 
             JavaPluginMock plugin = mock(JavaPluginMock.class);

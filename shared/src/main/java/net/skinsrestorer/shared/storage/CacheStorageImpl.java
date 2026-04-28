@@ -25,8 +25,6 @@ import net.skinsrestorer.api.property.MojangSkinDataResult;
 import net.skinsrestorer.api.storage.CacheStorage;
 import net.skinsrestorer.api.storage.SkinStorage;
 import net.skinsrestorer.shared.config.StorageConfig;
-import net.skinsrestorer.shared.connections.MojangAPIImpl;
-import net.skinsrestorer.shared.exception.DataRequestExceptionShared;
 import net.skinsrestorer.shared.log.SRLogger;
 import net.skinsrestorer.shared.storage.adapter.AdapterReference;
 import net.skinsrestorer.shared.storage.adapter.StorageAdapter;
@@ -41,7 +39,6 @@ import java.util.UUID;
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class CacheStorageImpl implements CacheStorage {
     private final SRLogger logger;
-    private final MojangAPIImpl mojangAPI;
     private final SettingsManager settings;
     private final AdapterReference adapterReference;
     private final Injector injector;
@@ -60,21 +57,7 @@ public class CacheStorageImpl implements CacheStorage {
 
         try {
             Optional<MojangCacheData> stored = getCachedData(playerName, allowExpired);
-            if (stored.isPresent()) {
-                return stored.get().getUniqueId();
-            }
-
-            try {
-                Optional<UUID> uuid = mojangAPI.getUUID(playerName);
-
-                adapterReference.get().setCachedUUID(playerName,
-                        MojangCacheData.of(uuid.orElse(null), SRHelpers.getEpochSecond()));
-
-                return uuid;
-            } catch (DataRequestException e) {
-                logger.debug("Failed to get UUID from Mojang for %s".formatted(playerName), e);
-                throw new DataRequestExceptionShared(e);
-            }
+            return stored.flatMap(MojangCacheData::getUniqueId);
         } catch (StorageAdapter.StorageException e) {
             logger.warning("Failed to get UUID from cache for %s".formatted(playerName), e);
             return Optional.empty();

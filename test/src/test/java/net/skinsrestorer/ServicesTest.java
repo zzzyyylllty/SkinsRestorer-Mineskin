@@ -19,8 +19,6 @@ package net.skinsrestorer;
 
 import ch.jalu.configme.SettingsManager;
 import ch.jalu.injector.Injector;
-import net.skinsrestorer.shared.config.APIConfig;
-import net.skinsrestorer.shared.config.AdvancedConfig;
 import net.skinsrestorer.shared.connections.ServiceCheckerService;
 import net.skinsrestorer.shared.plugin.SRPlatformAdapter;
 import net.skinsrestorer.shared.plugin.SRPlugin;
@@ -30,15 +28,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.stubbing.Answer;
 
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @ExtendWith({MockitoExtension.class, SRExtension.class})
 class ServicesTest {
@@ -51,23 +42,8 @@ class ServicesTest {
 
     @Test
     void services(Injector injector) {
-        doAnswer((Answer<Void>) invocation -> {
-            Runnable runnable = invocation.getArgument(0);
-            long delay = invocation.getArgument(1);
-            TimeUnit unit = invocation.getArgument(2);
-
-            unit.sleep(delay);
-            runnable.run();
-
-            return null; // must return null because method returns void
-        }).when(srPlatformAdapter).runAsyncDelayed(any(), anyLong(), any());
-
         injector.register(SkinsRestorerLocale.class, skinsRestorerLocale);
         injector.register(SRPlatformAdapter.class, srPlatformAdapter);
-
-        when(settings.getProperty(APIConfig.MOJANG_BATCH_WINDOW_SECONDS)).thenReturn(1);
-        when(settings.getProperty(AdvancedConfig.NO_CONNECTIONS)).thenReturn(false);
-        when(settings.getProperty(APIConfig.ELYBY_ENABLED)).thenReturn(false);
 
         injector.register(SettingsManager.class, settings);
 
@@ -76,18 +52,8 @@ class ServicesTest {
         injector.getSingleton(MetricsCounter.class);
         ServiceCheckerService.ServiceCheckResponse serviceChecker = injector.getSingleton(ServiceCheckerService.class).checkServices();
 
-        serviceChecker.getResults().forEach(System.out::println);
-
-        assertFalse(serviceChecker.getResults().isEmpty());
-
-        // TODO: Mock api endpoints
-        /*
-        assertEquals(3, serviceChecker.getWorkingUUID());
-        assertEquals(3, serviceChecker.getWorkingProfile());
-
-        assertEquals(2, metricsCounter.collect(MetricsCounter.Service.ECLIPSE_UUID));
-        assertEquals(2, metricsCounter.collect(MetricsCounter.Service.ECLIPSE_PROFILE));
-        assertEquals(2, metricsCounter.collect(MetricsCounter.Service.MOJANG));
-         */
+        // Mojang/Eclipse API services have been removed.
+        // All API requests now go through MineSkin only.
+        assertTrue(serviceChecker.getResults().isEmpty());
     }
 }

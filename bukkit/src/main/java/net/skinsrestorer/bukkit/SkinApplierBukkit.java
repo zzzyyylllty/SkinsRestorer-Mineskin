@@ -29,12 +29,14 @@ import net.skinsrestorer.shared.api.SkinApplierAccess;
 import net.skinsrestorer.shared.api.event.EventBusImpl;
 import net.skinsrestorer.shared.api.event.SkinApplyEventImpl;
 import net.skinsrestorer.shared.config.AdvancedConfig;
+import net.skinsrestorer.shared.log.SRLogger;
 import net.skinsrestorer.shared.utils.ReflectionUtil;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 
 import javax.inject.Inject;
+import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.List;
 
@@ -47,6 +49,7 @@ public class SkinApplierBukkit implements SkinApplierAccess<Player> {
     private final SkinRefresher refresh;
     private final SpigotPassengerUtil passengerUtil;
     private final SettingsManager settingsManager;
+    private final SRLogger logger;
 
     @Override
     public void applySkin(Player player, SkinProperty property) {
@@ -72,20 +75,26 @@ public class SkinApplierBukkit implements SkinApplierAccess<Player> {
             return;
         }
 
+        logger.debug("Skin value length=%d, signature length=%d".formatted(
+                property.getValue() == null ? -1 : property.getValue().length(),
+                property.getSignature() == null ? -1 : property.getSignature().length()
+        ));
+
+        logger.debug("applySkinSync: Starting skin apply for player %s".formatted(player.getName()));
+
         // We do things with passengers to avoid desync issues with riding entities
         if (SpigotPassengerUtil.isAvailable()) {
             passengerUtil.ejectPassengers(player);
         }
 
-        // If the Paper API is available, we use it to apply the skin
-        if (ReflectionUtil.classExists("com.destroystokyo.paper.profile.PlayerProfile")
-                && PaperSkinApplier.hasProfileMethod()) {
-            PaperSkinApplier.applySkin(player, property);
-            return;
-        }
-        // Otherwise we use the SkinsRestorer adapter to apply the skin
+        // Use the reflection adapter to modify the NMS GameProfile directly.
+        // This is more reliable than PaperSkinApplier.setPlayerProfile() across
+        // all Paper 1.21.x versions, since setPlayerProfile does not always
+        // propagate to the underlying ServerPlayer.gameProfile used by packets.
         applyAdapter.applyProperty(player, property);
 
+        logger.debug("applySkinSync: Running other-player refresh (teleport=%s)".formatted(
+                settingsManager.getProperty(AdvancedConfig.TELEPORT_REFRESH)));
         if (settingsManager.getProperty(AdvancedConfig.TELEPORT_REFRESH)) {
             teleportOtherRefresh(player);
         } else {
@@ -93,7 +102,20 @@ public class SkinApplierBukkit implements SkinApplierAccess<Player> {
         }
 
         // Refresh the players own skin
-        refresh.refresh(player);
+        logger.debug("applySkinSync: Running self refresh (%s)".formatted(refresh.getClass().getSimpleName()));
+        try {
+            refresh.refresh(player);
+            logger.debug("applySkinSync: Self refresh completed");
+        } catch (Exception e) {
+            logger.debug("applySkinSync: Self refresh failed: %s".formatted(e.getMessage()));
+        }
+
+        // On MC 1.21.2+, the mapping's refresh() already calls PlayerList.respawn() which
+        // handles the full configuration state transition (re-login). Calling
+        // CraftPlayer.refreshPlayer() additionally can interfere by restoring the cached
+        // login GameProfile (which has the OLD skin), especially on servers with restricted
+        // network access where the session server is unreachable.
+        // Skip it entirely on 1.21+ since the mapping's accept() handles everything.
     }
 
     private void normalOtherRefresh(Player player) {

@@ -17,34 +17,9 @@
  */
 package net.skinsrestorer.api.connections;
 
-import net.skinsrestorer.api.exception.DataRequestException;
-import net.skinsrestorer.api.property.MojangSkinDataResult;
-import net.skinsrestorer.api.property.SkinProperty;
-
-import java.util.Optional;
-import java.util.UUID;
-
 /**
- * Fetch Minecraft data from Mojang's API.
- * We use internal data providers to speed up the process and avoid spamming Mojang's API.
- * You have the option to fetch data from mojang:
- * - Get UUID and SkinProperty by a premium player name
- * - SkinProperty by UUID
- * - UUID by premium player name
- * This will not use any local cache, but one of our data providers may remotely cache the result data.
+ * All API requests now go through MineSkin.
+ * Mojang and Eclipse API are no longer used.
  */
 public interface MojangAPI {
-    /**
-     * Get skin property by player name, this method will return empty if the player is not premium.
-     * It may return a hardcoded skin value, for example for "Steve" or "Alex".
-     *
-     * @param nameOrUniqueId Can be a premium player username or unique id (dashed or non-dashed)
-     * @return Skin or empty if the player is not premium
-     * @throws DataRequestException If there was an error while getting the data
-     */
-    Optional<MojangSkinDataResult> getSkin(String nameOrUniqueId) throws DataRequestException;
-
-    Optional<UUID> getUUID(String playerName) throws DataRequestException;
-
-    Optional<SkinProperty> getProfile(UUID uuid) throws DataRequestException;
 }

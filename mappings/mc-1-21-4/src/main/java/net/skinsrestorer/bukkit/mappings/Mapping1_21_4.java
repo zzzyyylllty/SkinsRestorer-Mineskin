@@ -23,10 +23,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.Entity;
 import net.skinsrestorer.bukkit.utils.HandleReflection;
 import net.skinsrestorer.viaversion.ExceptionSupplier;
 import net.skinsrestorer.viaversion.ViaPacketData;
 import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerRespawnEvent;
 
 import java.util.List;
 import java.util.Set;
@@ -41,8 +43,24 @@ public class Mapping1_21_4 implements IMapping {
     public void accept(Player player, Predicate<ExceptionSupplier<ViaPacketData>> viaFunction) {
         ServerPlayer entityPlayer = HandleReflection.getHandle(player, ServerPlayer.class);
 
-        // Slowly getting from object to object till we get what is needed for
-        // the respawn packet
+        // On Minecraft 1.21.2+, the client caches the player profile (including
+        // skin) at login time and ignores profile updates from player info packets.
+        // The only way to update the skin is through a full re-login via the
+        // configuration state protocol. PlayerList.respawn() handles this
+        // internally (sends ClientboundStartConfigurationPacket, awaits
+        // acknowledgment, re-logs the player with the updated GameProfile).
+        try {
+            // keepData=true preserves inventory, XP, effects, etc.
+            entityPlayer.server.getPlayerList().respawn(entityPlayer, true, Entity.RemovalReason.CHANGED_DIMENSION, PlayerRespawnEvent.RespawnReason.PLUGIN);
+            return;
+        } catch (Throwable e) {
+            // Fallback to the packet-based refresh approach
+            fallbackRefresh(entityPlayer, player, viaFunction);
+        }
+    }
+
+    private void fallbackRefresh(ServerPlayer entityPlayer, Player player,
+                                  Predicate<ExceptionSupplier<ViaPacketData>> viaFunction) {
         ServerLevel world = entityPlayer.serverLevel();
 
         CommonPlayerSpawnInfo spawnInfo = entityPlayer.createCommonSpawnInfo(world);

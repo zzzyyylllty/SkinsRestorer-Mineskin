@@ -23,12 +23,10 @@ import net.skinsrestorer.api.PropertyUtils;
 import net.skinsrestorer.api.connections.model.MineSkinResponse;
 import net.skinsrestorer.api.exception.DataRequestException;
 import net.skinsrestorer.api.exception.MineSkinException;
-import net.skinsrestorer.api.model.MojangProfileResponse;
 import net.skinsrestorer.api.property.*;
 import net.skinsrestorer.api.storage.SkinStorage;
 import net.skinsrestorer.shared.config.StorageConfig;
 import net.skinsrestorer.shared.connections.MineSkinAPIImpl;
-import net.skinsrestorer.shared.connections.MojangAPIImpl;
 import net.skinsrestorer.shared.connections.RecommendationsState;
 import net.skinsrestorer.shared.connections.responses.RecommenationResponse;
 import net.skinsrestorer.shared.log.SRLogger;
@@ -56,7 +54,6 @@ public class SkinStorageImpl implements SkinStorage {
     public static final String RECOMMENDATION_PREFIX = "sr-recommendation-";
     private final SRLogger logger;
     private final CacheStorageImpl cacheStorage;
-    private final MojangAPIImpl mojangAPI;
     private final MineSkinAPIImpl mineSkinAPI;
     private final SettingsManager settings;
     private final AdapterReference adapterReference;
@@ -95,38 +92,10 @@ public class SkinStorageImpl implements SkinStorage {
 
     @Override
     public Optional<SkinProperty> updatePlayerSkinData(UUID uuid) throws DataRequestException {
-        return updatePlayerSkinData(uuid, mojangAPI::getProfileFresh, false, true);
-    }
-
-    private Optional<SkinProperty> updatePlayerSkinData(UUID uuid, ProfileGetter profileGetter, boolean skipDbLookup, boolean ignoreExpiry) throws DataRequestException {
+        // External API calls (Mojang/Eclipse) have been removed.
+        // Skin updates are no longer fetched from external services.
         try {
-            Optional<PlayerSkinData> optionalData = skipDbLookup ? Optional.empty() : adapterReference.get().getPlayerSkinData(uuid);
-            Optional<SkinProperty> currentSkin = optionalData.map(PlayerSkinData::getProperty);
-
-            long timestamp = -1;
-            if (optionalData.isPresent()) {
-                PlayerSkinData currentSkinData = optionalData.get();
-                if (!ignoreExpiry && !isPlayerSkinExpired(currentSkinData.getTimestamp())) {
-                    // We have valid data, let's return it
-                    return currentSkin;
-                } else {
-                    timestamp = PropertyUtils.getSkinProfileData(currentSkinData.getProperty()).getTimestamp();
-                }
-            }
-
-            Optional<SkinProperty> skinProperty = profileGetter.getProfile(uuid);
-            if (skinProperty.isEmpty()) {
-                return currentSkin;
-            }
-
-            MojangProfileResponse response = PropertyUtils.getSkinProfileData(skinProperty.get());
-
-            if (response.getTimestamp() <= timestamp) {
-                return currentSkin; // API even returned older skin data
-            }
-
-            setPlayerSkinData(uuid, response.getProfileName(), skinProperty.get(), SRHelpers.getEpochSecond());
-            return skinProperty;
+            return adapterReference.get().getPlayerSkinData(uuid).map(PlayerSkinData::getProperty);
         } catch (StorageAdapter.StorageException e) {
             logger.warning("Failed to update skin data for %s".formatted(uuid), e);
             return Optional.empty();
@@ -144,45 +113,33 @@ public class SkinStorageImpl implements SkinStorage {
             return Optional.empty();
         }
 
+        // Without Mojang/Eclipse API, only cached player skin data is available
         try {
-            // We already know the UUID, so nothing to do here
             if (uuidParseResult.isEmpty()) {
                 Optional<MojangCacheData> cached = cacheStorage.getCachedData(nameOrUniqueId, allowExpired);
                 if (cached.isPresent()) {
                     Optional<UUID> optionalUUID = cached.get().getUniqueId();
 
-                    // User does not exist
                     if (optionalUUID.isEmpty()) {
                         return Optional.empty();
                     }
 
                     UUID uuid = optionalUUID.get();
-                    return updatePlayerSkinData(uuid, mojangAPI::getProfile, skipDbLookup, false)
-                            .map(skinProperty -> MojangSkinDataResult.of(uuid, skinProperty));
+                    Optional<PlayerSkinData> playerSkinData = adapterReference.get().getPlayerSkinData(uuid);
+                    return playerSkinData.map(data ->
+                            MojangSkinDataResult.of(uuid, data.getProperty()));
                 }
+            } else {
+                UUID uuid = uuidParseResult.get();
+                Optional<PlayerSkinData> playerSkinData = adapterReference.get().getPlayerSkinData(uuid);
+                return playerSkinData.map(data ->
+                        MojangSkinDataResult.of(uuid, data.getProperty()));
             }
-
-            Optional<MojangSkinDataResult> optional = mojangAPI.getSkin(nameOrUniqueId);
-
-            // Only cache name -> UUID if this is a name and not a UUID
-            if (uuidParseResult.isEmpty()) {
-                adapterReference.get().setCachedUUID(nameOrUniqueId,
-                        MojangCacheData.of(optional.map(MojangSkinDataResult::getUniqueId).orElse(null),
-                                SRHelpers.getEpochSecond()));
-            }
-
-            // Cache the skin data
-            if (optional.isPresent()) {
-                MojangSkinDataResult result = optional.get();
-                return updatePlayerSkinData(result.getUniqueId(), uuid -> Optional.of(result.getSkinProperty()), skipDbLookup, false)
-                        .map(skinProperty -> MojangSkinDataResult.of(result.getUniqueId(), skinProperty));
-            }
-
-            return optional;
         } catch (StorageAdapter.StorageException e) {
             logger.warning("Failed to get skin from cache for %s".formatted(nameOrUniqueId), e);
-            return Optional.empty();
         }
+
+        return Optional.empty();
     }
 
     @Override
@@ -345,8 +302,17 @@ public class SkinStorageImpl implements SkinStorage {
 
             return Optional.of(InputDataResult.of(SkinIdentifier.ofURL(input, response.getGeneratedVariant()), response.getProperty()));
         } else if (typeHint != SkinType.CUSTOM) {
-            return getPlayerSkin(input, false, true).map(result ->
-                    InputDataResult.of(SkinIdentifier.ofPlayer(result.getUniqueId()), result.getSkinProperty()));
+            // Check cache first
+            Optional<MojangSkinDataResult> cached = getPlayerSkin(input, false, true);
+            if (cached.isPresent()) {
+                return cached.map(result ->
+                        InputDataResult.of(SkinIdentifier.ofPlayer(result.getUniqueId()), result.getSkinProperty()));
+            }
+
+            // Not in cache, generate from player name via MineSkin API
+            MineSkinResponse response = mineSkinAPI.genSkinFromName(input, skinVariantHint);
+            setCustomSkinData(input, response.getProperty());
+            return Optional.of(InputDataResult.of(SkinIdentifier.ofCustom(input), response.getProperty()));
         }
 
         return Optional.empty();
@@ -403,37 +369,15 @@ public class SkinStorageImpl implements SkinStorage {
         }
     }
 
-    /**
-     * Checks if a player skin is expired and should be re-fetched from mojang.
-     *
-     * @param timestamp in seconds
-     * @return true if skin is outdated
-     */
-    private boolean isPlayerSkinExpired(long timestamp) {
-        // Do not update if timestamp is not 0 or update is disabled.
-        if (timestamp == -1 || settings.getProperty(StorageConfig.DISALLOW_AUTO_UPDATE_SKIN)) {
-            return false;
-        }
-
-        long now = SRHelpers.getEpochSecond();
-        long expiryDate = timestamp + TimeUnit.MINUTES.toSeconds(settings.getProperty(StorageConfig.SKIN_EXPIRES_AFTER));
-
-        return expiryDate <= now;
-    }
-
     public boolean purgeOldSkins(int days) {
         long targetPurgeTimestamp = Instant.now().minus(days, ChronoUnit.DAYS).getEpochSecond();
 
         try {
             adapterReference.get().purgeStoredOldSkins(targetPurgeTimestamp);
-            return true; // TODO: Do better than true/false return
+            return true;
         } catch (StorageAdapter.StorageException e) {
             logger.severe("Failed to purge old skins", e);
             return false;
         }
-    }
-
-    private interface ProfileGetter {
-        Optional<SkinProperty> getProfile(UUID uuid) throws DataRequestException;
     }
 }
